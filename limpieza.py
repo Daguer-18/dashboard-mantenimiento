@@ -64,14 +64,28 @@ MODOS_ISO = {
     "OHE": "Sobrecalentamiento",
     "FTS": "Falla al arrancar",
     "UST": "Parada espuria",
-    "BRD": "Ruptura / falla de aislamiento",
+    "BRD": "Ruptura / rotura (breakdown)",
     "ERO": "Lectura errónea",
     "NOO": "Sin señal de salida",
+    # modos adicionales (equipos de manejo de sólidos: planta cementera)
+    "STD": "Deficiencia estructural / desgaste",
+    "PLU": "Atoro / obstrucción",
+    "ELU": "Fuga externa de fluido de servicio (aceite)",
+    "AIR": "Lectura anormal de instrumento",
+    "NOI": "Ruido anormal",
     "UNK": "No determinado",
 }
 # Reglas de reclasificación: palabra clave en la CAUSA RAÍZ (prioridad) -> modo
 CAUSA_A_MODO = [
-    (r"sello", "ELP"), (r"rodamiento|grasa|desalineamiento|acople", "VIB"),
+    (r"sello", "ELP"),
+    # --- manejo de sólidos (cementera); van antes que las reglas genéricas
+    (r"atoro|obstrucci", "PLU"), (r"hidr[aá]ulic|aceite", "ELU"),
+    (r"celda de carga|descalibra|encoder", "AIR"),
+    (r"rotura de banda|empalme|rotura de cadena|rotura de resorte|fisura", "BRD"),
+    (r"blindaje|martillo|barras|malla|revestimiento|cangil|rastra", "STD"),
+    (r"pull.?cord|fin de carrera|sensor de desalineamiento", "UST"),
+    (r"aislamiento del motor|arrancador|portacable|contactor", "FTS"),
+    (r"lubricaci|reductor", "OHE"), (r"rodamiento|grasa|desalineamiento|acople", "VIB"),
     (r"impulsor|cavitaci", "LOO"), (r"rodete|s[oó]lidos|ventilador|polvo|disipador", "OHE"),
     (r"devanado|igbt", "FTS"), (r"bus dc|transitorio", "UST"),
     (r"descargas parciales|aislamiento", "BRD"),
@@ -79,14 +93,18 @@ CAUSA_A_MODO = [
 ]
 # ... y si no hay causa, en el TEXTO del operador, solo si NO es ambiguo
 TEXTO_A_MODO = [
+    (r"atorad|atoro|atascad|tapad", "PLU"), (r"aceite|hidr[aá]ulic", "ELU"),
+    (r"banda rota|se rompi[oó] la (faja|banda)|cadena rota", "BRD"),
+    (r"b[aá]scula marca mal|pesaje", "AIR"), (r"ruido|golpeteo", "NOI"),
     (r"fuga|gotea", "ELP"), (r"vibra|ruido en rodamiento", "VIB"),
     (r"no levanta|bajo caudal|no bombea", "LOO"), (r"temperatura|calentamiento", "OHE"),
     (r"se apag[oó] solo|alarma en variador", "UST"), (r"marca mal|lectura", "ERO"),
     (r"no marca|sin se[ñn]al", "NOO"),
 ]
 MODO_A_ESPECIALIDAD = {"ELP": "Mecánica", "VIB": "Mecánica", "LOO": "Mecánica", "OHE": None,
-                       "FTS": "Eléctrica", "UST": "Eléctrica", "BRD": "Eléctrica",
-                       "ERO": "Instrumentación", "NOO": "Instrumentación"}
+                       "FTS": "Eléctrica", "UST": "Eléctrica", "BRD": None,
+                       "ERO": "Instrumentación", "NOO": "Instrumentación",
+                       "STD": "Mecánica", "PLU": "Mecánica", "ELU": "Mecánica", "AIR": "Instrumentación", "NOI": None}
 
 
 # ------------------------------------------------------------------ CARGA
@@ -107,6 +125,9 @@ def _norm_id(s):
     if pd.isna(s):
         return s
     s = str(s).strip().upper().replace("_", "-").replace(" ", "")
+    m = re.fullmatch(r"(\d{3})-?([A-Z]{2,4})-?(\d{1,2})", s)   # TAG tipo 110-TOL-01
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{int(m.group(3)):02d}"
     m = re.fullmatch(r"([A-Z]+)-?(\d+)", s)
     return f"{m.group(1)}-{int(m.group(2)):02d}" if m else s
 
@@ -272,10 +293,12 @@ def periodo(df):
     return ini, fin
 
 
-def kpis_por_equipo(df, ini=None, fin=None):
+def kpis_por_equipo(df, ini=None, fin=None, frac_operacion=1.0):
+    """frac_operacion = horas planificadas de operación / horas calendario
+    (1.0 = operación continua 24/7; p.ej. 8200/8760 si la planta planifica 8,200 h/año)."""
     if ini is None:
         ini, fin = periodo(df)
-    horas_cal = (fin - ini).total_seconds() / 3600
+    horas_cal = (fin - ini).total_seconds() / 3600 * frac_operacion
     base = df[df["Categoria"] != "Descartado"].copy()
     ttr_ok = df[df["Usar_TTR"]]
     filas = []

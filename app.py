@@ -173,6 +173,10 @@ st.sidebar.subheader("Parámetros")
 capacidad = st.sidebar.number_input("Capacidad semanal (HH)", 20, 5000, 288, 8,
                                     help="Técnicos disponibles × horas por semana. Ej.: 6 × 48 = 288")
 tol = st.sidebar.slider("Tolerancia adherencia (días)", 0, 10, 3)
+h_plan = st.sidebar.number_input("Horas planificadas de operación al año", 1000, 8784, 8760, 10,
+                                 help="8,760 = operación continua 24/7. Si la planta planifica menos horas "
+                                      "(p.ej. 8,200 h en la cementera), ingrésalo aquí: MTBF y Ao se calculan sobre esa base.")
+FRAC = h_plan / 8760
 
 # ventana de tiempo seleccionada
 if f_anio == "Todos":
@@ -198,14 +202,14 @@ if df_eq.empty or df.empty:
 equipos_sel = sorted(df_eq["equipo"].dropna().unique())
 n_eq = len(equipos_sel)
 
-k = L.kpis_por_equipo(df, ini_w, fin_w)
+k = L.kpis_por_equipo(df, ini_w, fin_w, FRAC)
 adh, adh_ok, adh_tot = L.adherencia(df, tol, fin_w)
 bl_sem, bl_hh, bl_n = L.backlog(df_eq, capacidad)
 cc, cp = L.costos(df)
 ratio = cc / cp if cp else np.nan
 fallas_tot = int(k["N_fallas"].sum())
 down = k["Horas_paro_correctivo"].sum() + k["Horas_paro_preventivo"].sum()
-H_tot = n_eq * H_VENT
+H_tot = n_eq * H_VENT * FRAC
 ao_g = 100 * (H_tot - down) / H_tot
 down_pct = 100 - ao_g
 mtbf_g = (H_tot - down) / fallas_tot if fallas_tot else np.nan
@@ -220,7 +224,7 @@ def evolucion_mensual(d, d_eq):
     filas = []
     for m0 in pd.date_range(ini_w.replace(day=1), fin_w - pd.Timedelta(seconds=1), freq="MS"):
         m1 = min(m0 + pd.offsets.MonthBegin(1), fin_w)
-        h = n_eq * (m1 - max(m0, ini_w)).total_seconds() / 3600
+        h = n_eq * (m1 - max(m0, ini_w)).total_seconds() / 3600 * FRAC
         g = d[(d["t_inicio"] >= m0) & (d["t_inicio"] < m1)]
         ttr = g[g["Usar_TTR"] & g["tipo_ot"].isin(["Correctivo", "Preventivo"])]["TTR_validado_h"].sum()
         fal = int(((g["tipo_ot"] == "Correctivo") & g["Usar_Evento"]).sum())
@@ -236,7 +240,8 @@ ev = evolucion_mensual(df, df_eq)
 
 st.title("Dashboard de Control de Mantenimiento")
 st.caption(f"Periodo {ini_w:%d/%m/%Y} – {(fin_w - pd.Timedelta(seconds=1)):%d/%m/%Y} · {len(df):,} OT filtradas · "
-           f"{n_eq} equipo{'s' if n_eq != 1 else ''} · operación continua 24/7")
+           f"{n_eq} equipo{'s' if n_eq != 1 else ''} · "
+           + ("operación continua 24/7" if h_plan >= 8760 else f"{h_plan:,} h planificadas/año"))
 
 t1, t6, t2, t3, t4, t5, t7 = st.tabs(["Estratégico", "Evolución mensual", "Táctico", "Operativo",
                                       "Confiabilidad (Weibull)", "Calidad de datos", "Fichas de indicadores"])
